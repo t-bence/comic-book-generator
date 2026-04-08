@@ -43,11 +43,29 @@ def _call_gemini_image_model(contents: List, output_path: str) -> str:
             contents=contents,
         )
 
-        if not response.parts:
-            raise ValueError("No parts found in the response from the model.")
+        if (
+            not response.candidates
+            or not response.candidates[0].content
+            or not response.candidates[0].content.parts
+        ):
+            # Enhanced logging for debugging
+            print(f"DEBUG: Response object: {response}")
+
+            error_msg = "No parts found in the response from the model."
+            if response.candidates:
+                candidate = response.candidates[0]
+                if candidate.finish_reason:
+                    error_msg += f" Finish reason: {candidate.finish_reason}"
+                    error_msg += f"Content: {candidate.content}"
+                if candidate.safety_ratings:
+                    blocked_ratings = [r for r in candidate.safety_ratings if r.blocked]
+                    if blocked_ratings:
+                        error_msg += f" Safety ratings: {blocked_ratings}"
+
+            raise ValueError(error_msg)
 
         image_saved = False
-        for part in response.parts:
+        for part in response.candidates[0].content.parts:
             # Inline data contains image bytes if the model generated an image
             if part.inline_data:
                 image_bytes = part.inline_data.data
@@ -68,7 +86,11 @@ def _call_gemini_image_model(contents: List, output_path: str) -> str:
         if not image_saved:
             # If no image was found, check for text (might be a safety filter rejection or explanation)
             text_response = " ".join(
-                [part.text for part in response.parts if part.text]
+                [
+                    part.text
+                    for part in response.candidates[0].content.parts
+                    if part.text
+                ]
             )
             raise ValueError(
                 f"No image was generated. Model response text: {text_response}"
